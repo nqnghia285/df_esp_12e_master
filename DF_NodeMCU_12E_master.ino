@@ -1,22 +1,15 @@
 #include <ESP8266WiFi.h>
-
 #include <dhtnew.h>
-
 #include <ArduinoJson.h>
-
 #include <WebSocketsClient.h>
 #include <SocketIOclient.h>
-
 #include <Shipper.h>
-
 #include <Hash.h>
 
 // Define const String
 #define ON      "on"
 #define OFF     "off"
 #define RUNNING "running"
-#define CT      "cycle_time"
-#define TIME    2000
 
 #define CODE    "CODE001"
 
@@ -61,8 +54,7 @@ float temperatureOfScript = 31.0;
 bool isAuto = false; //////////////////////////////////////////
 
 unsigned long previousTime = 0;
-//unsigned long now = 0;
-int cycleTime = 5000; // 5s
+int cycleTime = 3000; // 3s (minimum = 3s)
 
 //////////////////////////////
 
@@ -275,6 +267,7 @@ void serverSendAckConnection(const char * payload, size_t length) {
 void serverSendControlMachine(const char * payload, size_t length) {
   USE_SERIAL.print("[Control Machine]Server says: ");
   USE_SERIAL.println(payload);
+  // {"status":on/off/running}
 
   const int capacity = JSON_OBJECT_SIZE(2);
   DynamicJsonDocument doc(capacity);
@@ -311,8 +304,9 @@ void serverSendControlMachine(const char * payload, size_t length) {
 void serverSendControlDevice(const char * payload, size_t length) {
   USE_SERIAL.print("[Control Device]Server says: ");
   USE_SERIAL.println(payload);
+  // {"e-fan":true/false,"b-fan":true/false,"heater":true/false}
 
-  if (!isAuto) {
+  if (statusOfMachine.equals(RUNNING) && !isAuto) {
     const int capacity = JSON_OBJECT_SIZE(6);
     DynamicJsonDocument doc(capacity);
   
@@ -348,6 +342,7 @@ void serverSendControlDevice(const char * payload, size_t length) {
 void serverSendSetCycleTime(const char * payload, size_t length) {
   USE_SERIAL.print("[Set Cycle Time]Server says: ");
   USE_SERIAL.println(payload);
+  // {"cycle-time":3000}
   
   const int capacity = JSON_OBJECT_SIZE(2);
   DynamicJsonDocument doc(capacity);
@@ -359,6 +354,12 @@ void serverSendSetCycleTime(const char * payload, size_t length) {
   if (err == DeserializationError::Ok) {
     cycleTime = doc["cycle-time"].as<int>();
 
+    if (cycleTime < 3000) {
+      cycleTime = 3000;
+    }
+
+//    Serial.print("Cycle time: ");
+//    Serial.println(cycleTime);
     // MCU send ack to Server
     shipper.emit(MSASCT, IST);
   } else {
@@ -372,6 +373,7 @@ void serverSendSetCycleTime(const char * payload, size_t length) {
 void serverSendScript(const char * payload, size_t length) {
   USE_SERIAL.print("[Script]Server says: ");
   USE_SERIAL.println(payload);
+  // {"temperature":32.0}
 
   const int capacity = JSON_OBJECT_SIZE(2);
   DynamicJsonDocument doc(capacity);
@@ -381,7 +383,10 @@ void serverSendScript(const char * payload, size_t length) {
   DeserializationError err = deserializeJson(doc, message);
   
   if (err == DeserializationError::Ok) {
-    temperatureOfScript = doc["temperature"].as<int>();
+    temperatureOfScript = doc["temperature"].as<float>();
+
+//    Serial.print("Temperature of script: ");
+//    Serial.println(temperatureOfScript);
 
     statusOfMachine = RUNNING;
     
@@ -398,24 +403,34 @@ void serverSendScript(const char * payload, size_t length) {
 void serverSendControlManualOrAuto(const char * payload, size_t length) {
   USE_SERIAL.print("[Manual Or Auto]Server says: ");
   USE_SERIAL.println(payload);
-
-  const int capacity = JSON_OBJECT_SIZE(2);
-  DynamicJsonDocument doc(capacity);
-
-  String message = handleMessage(payload);
-
-  DeserializationError err = deserializeJson(doc, message);
+  // {"is-auto":true/false}
   
-  if (err == DeserializationError::Ok) {
-    isAuto = doc["is-auto"].as<bool>();
-    // MCU send ack to Server
-    shipper.emit(MSACMOA, IST);
+  if (statusOfMachine.equals(RUNNING)) {
+    const int capacity = JSON_OBJECT_SIZE(2);
+    DynamicJsonDocument doc(capacity);
+  
+    String message = handleMessage(payload);
+  
+    DeserializationError err = deserializeJson(doc, message);
+    
+    if (err == DeserializationError::Ok) {
+      isAuto = doc["is-auto"].as<bool>();
+
+//    Serial.print("isAuto: ");
+//    Serial.println(isAuto);
+      
+      // MCU send ack to Server
+      shipper.emit(MSACMOA, IST);
+    } else {
+      // MCU send ack to Server
+      shipper.emit(MSACMOA, ISF);
+    }
+  
+    doc.clear();
   } else {
     // MCU send ack to Server
     shipper.emit(MSACMOA, ISF);
   }
-
-  doc.clear();
 }
 
 ////////////////////////////////////////
@@ -511,24 +526,6 @@ void timerTask() {
   }
 }
 //////////////////////////////////////
-void test() {
-  // Test relay
-  turnOff(relay_pin_of_heater);
-  turnOff(relay_pin_of_blow_fan);
-  turnOff(relay_pin_of_exhaust_fan);
-  delay(500);
-  turnOn(relay_pin_of_heater);
-  turnOn(relay_pin_of_blow_fan);
-  turnOn(relay_pin_of_exhaust_fan);
-  delay(500);
-
-  String ms = readSensor();
-
-  shipper.emit(MSD, ms);
-  
-  USE_SERIAL.println(ms);
-}
-
 void setup() {
   USE_SERIAL.begin(115200);
   
