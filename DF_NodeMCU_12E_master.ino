@@ -14,7 +14,9 @@
 // Define const String
 #define ON      "on"
 #define OFF     "off"
+#define RUNNING "running"
 #define CT      "cycle_time"
+#define TIME    2000
 
 #define CODE    "CODE001"
 
@@ -48,15 +50,15 @@
 #define USE_SERIAL Serial
 //////////////////////////////
 
-int statusOfMachine = -1;
+String statusOfMachine = RUNNING;/////////////////////////////////////////////////
 bool eFan = false;
 bool bFan = false;
 bool heater = false;
 
 // Parameters of script
-int temperatureOfScript = 0;
+float temperatureOfScript = 31.0;
 
-bool isAuto = false;
+bool isAuto = false; //////////////////////////////////////////
 
 unsigned long previousTime = 0;
 //unsigned long now = 0;
@@ -282,10 +284,10 @@ void serverSendControlMachine(const char * payload, size_t length) {
   DeserializationError err = deserializeJson(doc, message);
   
   if (err == DeserializationError::Ok) {
-    statusOfMachine = doc["status"].as<int>();
+    statusOfMachine = doc["status"].as<String>();
 
     // Update status of devices
-    if (statusOfMachine == -1 || statusOfMachine == 0) {
+    if (statusOfMachine.equals(OFF) || statusOfMachine.equals(ON)) {
       isAuto = false;
       eFan = false;
       bFan = false;
@@ -337,6 +339,9 @@ void serverSendControlDevice(const char * payload, size_t length) {
     }
   
     doc.clear();
+  } else {
+    // MCU send ack to Server
+    shipper.emit(MSACD, ISF);
   }
 }
 
@@ -377,6 +382,9 @@ void serverSendScript(const char * payload, size_t length) {
   
   if (err == DeserializationError::Ok) {
     temperatureOfScript = doc["temperature"].as<int>();
+
+    statusOfMachine = RUNNING;
+    
     // MCU send ack to Server
     shipper.emit(MSAS, IST);
   } else {
@@ -409,8 +417,24 @@ void serverSendControlManualOrAuto(const char * payload, size_t length) {
 
   doc.clear();
 }
+
 ////////////////////////////////////////
-// Function read and send data of sensors
+// Function control device follow script
+void controlDeviceFollowScript(float tempAverage) {
+  if (isAuto) {
+    if (tempAverage > 0.0 && tempAverage > temperatureOfScript) {
+      controlExhaustFan(true);
+      controlBlowFan(true);
+      controlHeater(false);
+    } else if (tempAverage > 0.0) {
+      controlExhaustFan(false);
+      controlBlowFan(false);
+      controlHeater(true);
+    }
+  }
+}
+
+// Function read and send data of sensors + Auto control devices follow script
 void sendSensorData() {
   const int capacity = JSON_OBJECT_SIZE(2) +
                        JSON_OBJECT_SIZE(4) +
@@ -429,10 +453,34 @@ void sendSensorData() {
   DeserializationError err = deserializeJson(params, result);
   
   if (err == DeserializationError::Ok) {
+    // Params for calculating average temperature of sensors
+    DynamicJsonDocument arr(capacity);
+    float tempAverage = 0.0;
+    int count = 0;
+    /////
     JsonObject objects = params.as<JsonObject>();
     for (JsonObject::iterator it=objects.begin(); it!=objects.end(); ++it) {
       payload[it->key()] = it->value();
+
+      //
+      DeserializationError er = deserializeJson(arr, it->value());
+      if (er == DeserializationError::Ok) {
+        if (arr["temperature"].is<float>()) {
+          tempAverage += arr["temperature"].as<float>();
+          count++;
+        }
+      }
     }
+
+    if (count > 0) {
+      tempAverage /= count;
+      Serial.println(tempAverage);
+    }
+
+    arr.clear();
+
+    // Auto control device follow script
+    controlDeviceFollowScript(tempAverage);
 
     String msg;
     serializeJson(payload, msg);
@@ -449,13 +497,12 @@ void sendSensorData() {
   doc.clear();
 }
 
-///////////////////////////////////////
 // Function handle task follow cycle time
-void timerTask(int stt,unsigned long &preTime, int cycleTime) {
-  if (stt == 1) {
+void timerTask() {
+  if (statusOfMachine.equals(RUNNING)) {
     unsigned long now = millis();
     
-    if (now - preTime > cycleTime) {
+    if (now - previousTime > cycleTime) {
       previousTime = now;
 
       // MCU send sensor data to Server
@@ -463,7 +510,6 @@ void timerTask(int stt,unsigned long &preTime, int cycleTime) {
     }
   }
 }
-
 //////////////////////////////////////
 void test() {
   // Test relay
@@ -547,5 +593,5 @@ void loop() {
   shipper.loop(socket);
 
   // Send sensor data follow cycle time
-  timerTask(statusOfMachine, previousTime, cycleTime);
+  timerTask();
 }
