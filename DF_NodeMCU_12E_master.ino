@@ -20,6 +20,7 @@
 #define SSCD    "server-send-control-device"
 #define SSSCT   "server-send-set-cycle-time"
 #define SSS     "server-send-script"
+#define SSFS    "server-send-finish-session"
 #define SSCMOA  "server-send-control-manual-or-auto"
 
 // MCU send
@@ -28,12 +29,13 @@
 #define MSACD   "mcu-send-ack-control-device"
 #define MSASCT  "mcu-send-ack-set-cycle-time"
 #define MSAS    "mcu-send-ack-script"
+#define MSAFS   "mcu-send-ack-finish-session"
 #define MSACMOA "mcu-send-ack-control-manual-or-auto"
 #define MSD     "mcu-send-data"
 
 // Message
-#define IST     "{\"isSuccess\":true}"
-#define ISF     "{\"isSuccess\":false}"
+#define IST     "{\"code\":\"CODE001\",\"isSuccess\":true}"
+#define ISF     "{\"code\":\"CODE001\",\"isSuccess\":false}"
 
 // DHT11 pin
 #define dht_pin_D1 5
@@ -43,7 +45,7 @@
 #define USE_SERIAL Serial
 //////////////////////////////
 
-String statusOfMachine = RUNNING;/////////////////////////////////////////////////
+String statusOfMachine = ON;/////////////////////////////////////////////////
 bool eFan = false;
 bool bFan = false;
 bool heater = false;
@@ -190,7 +192,7 @@ const char* pwd = ".password?";
 // Config server side
  char host[] = "192.168.100.54";
 //char host[] = "192.168.43.179";
-uint16_t port = 5050;
+uint16_t port = 5000;
 char path[] = "/"; // Socket.IO Base Path
 
 SocketIOclient socket;
@@ -267,9 +269,9 @@ void serverSendAckConnection(const char * payload, size_t length) {
 void serverSendControlMachine(const char * payload, size_t length) {
   USE_SERIAL.print("[Control Machine]Server says: ");
   USE_SERIAL.println(payload);
-  // {"status":on/off/running}
+  // {"code":"CODE001","status":on/off/running}
 
-  const int capacity = JSON_OBJECT_SIZE(2);
+  const int capacity = JSON_OBJECT_SIZE(5);
   DynamicJsonDocument doc(capacity);
 
   String message = handleMessage(payload);
@@ -277,22 +279,26 @@ void serverSendControlMachine(const char * payload, size_t length) {
   DeserializationError err = deserializeJson(doc, message);
   
   if (err == DeserializationError::Ok) {
-    statusOfMachine = doc["status"].as<String>();
-
-    // Update status of devices
-    if (statusOfMachine.equals(OFF) || statusOfMachine.equals(ON)) {
-      isAuto = false;
-      eFan = false;
-      bFan = false;
-      heater = false;
-
-      controlExhaustFan(false);
-      controlBlowFan(false);
-      controlHeater(false);
+    String code = doc["code"].as<String>();
+    Serial.println(code);
+    if (code.equals(CODE)) {
+      statusOfMachine = doc["status"].as<String>();
+      // Update status of devices
+        isAuto = false;
+        eFan = false;
+        bFan = false;
+        heater = false;
+  
+        controlExhaustFan(false);
+        controlBlowFan(false);
+        controlHeater(false);
+  
+      // MCU send ack to Server
+      shipper.emit(MSACM, IST);
+    } else {
+      // MCU send ack to Server
+      shipper.emit(MSACM, ISF);
     }
-
-    // MCU send ack to Server
-    shipper.emit(MSACM, IST);
   } else {
     // MCU send ack to Server
     shipper.emit(MSACM, ISF);
@@ -304,10 +310,10 @@ void serverSendControlMachine(const char * payload, size_t length) {
 void serverSendControlDevice(const char * payload, size_t length) {
   USE_SERIAL.print("[Control Device]Server says: ");
   USE_SERIAL.println(payload);
-  // {"e-fan":true/false,"b-fan":true/false,"heater":true/false}
+  // {"code":"CODE001","eFan":true/false,"bFan":true/false,"heater":true/false}
 
   if (statusOfMachine.equals(RUNNING) && !isAuto) {
-    const int capacity = JSON_OBJECT_SIZE(6);
+    const int capacity = JSON_OBJECT_SIZE(9);
     DynamicJsonDocument doc(capacity);
   
     String message = handleMessage(payload);
@@ -315,18 +321,25 @@ void serverSendControlDevice(const char * payload, size_t length) {
     DeserializationError err = deserializeJson(doc, message);
     
     if (err == DeserializationError::Ok) {
+      String code = doc["code"].as<String>();
+      Serial.println(code);
+      if (code.equals(CODE)) {
       
-      eFan = doc["e-fan"].as<bool>();
-      bFan = doc["b-fan"].as<bool>();
-      heater = doc["heater"].as<bool>();
-  
-      // Control device
-      controlExhaustFan(eFan);
-      controlBlowFan(bFan);
-      controlHeater(heater);
-  
-      // MCU send ack to Server
-      shipper.emit(MSACD, IST);
+        eFan = doc["eFan"].as<bool>();
+        bFan = doc["bFan"].as<bool>();
+        heater = doc["heater"].as<bool>();
+    
+        // Control device
+        controlExhaustFan(eFan);
+        controlBlowFan(bFan);
+        controlHeater(heater);
+    
+        // MCU send ack to Server
+        shipper.emit(MSACD, IST);
+      } else {
+        // MCU send ack to Server
+        shipper.emit(MSACD, ISF);
+      }
     } else {
       // MCU send ack to Server
       shipper.emit(MSACD, ISF);
@@ -342,9 +355,9 @@ void serverSendControlDevice(const char * payload, size_t length) {
 void serverSendSetCycleTime(const char * payload, size_t length) {
   USE_SERIAL.print("[Set Cycle Time]Server says: ");
   USE_SERIAL.println(payload);
-  // {"cycle-time":3000}
+  // {"code":"CODE001","cycleTime":3000}
   
-  const int capacity = JSON_OBJECT_SIZE(2);
+  const int capacity = JSON_OBJECT_SIZE(5);
   DynamicJsonDocument doc(capacity);
 
   String message = handleMessage(payload);
@@ -352,16 +365,23 @@ void serverSendSetCycleTime(const char * payload, size_t length) {
   DeserializationError err = deserializeJson(doc, message);
   
   if (err == DeserializationError::Ok) {
-    cycleTime = doc["cycle-time"].as<int>();
-
-    if (cycleTime < 3000) {
-      cycleTime = 3000;
+    String code = doc["code"].as<String>();
+    Serial.println(code);
+    if (code.equals(CODE)) {
+      cycleTime = doc["cycleTime"].as<int>();
+  
+      if (cycleTime < 3000) {
+        cycleTime = 3000;
+      }
+  
+  //    Serial.print("Cycle time: ");
+  //    Serial.println(cycleTime);
+      // MCU send ack to Server
+      shipper.emit(MSASCT, IST);
+    } else {
+      // MCU send ack to Server
+      shipper.emit(MSASCT, ISF);
     }
-
-//    Serial.print("Cycle time: ");
-//    Serial.println(cycleTime);
-    // MCU send ack to Server
-    shipper.emit(MSASCT, IST);
   } else {
     // MCU send ack to Server
     shipper.emit(MSASCT, ISF);
@@ -373,25 +393,39 @@ void serverSendSetCycleTime(const char * payload, size_t length) {
 void serverSendScript(const char * payload, size_t length) {
   USE_SERIAL.print("[Script]Server says: ");
   USE_SERIAL.println(payload);
-  // {"temperature":32.0}
+  // {"code":"CODE001","temperature":32.0}
 
-  const int capacity = JSON_OBJECT_SIZE(2);
+  const int capacity = JSON_OBJECT_SIZE(7);
   DynamicJsonDocument doc(capacity);
 
   String message = handleMessage(payload);
 
   DeserializationError err = deserializeJson(doc, message);
+
+  Serial.println("Message: ");
+  Serial.println(message);
   
   if (err == DeserializationError::Ok) {
-    temperatureOfScript = doc["temperature"].as<float>();
+    String code = doc["code"].as<String>();
+    Serial.println(code);
+    if (code.equals(CODE)) {
+      temperatureOfScript = doc["temperature"].as<float>();
+
+      Serial.print("doc[\"temperature\"].as<float>();");
+      Serial.println(doc["temperature"].as<float>());
 
 //    Serial.print("Temperature of script: ");
 //    Serial.println(temperatureOfScript);
 
-    statusOfMachine = RUNNING;
+      statusOfMachine = RUNNING;
+      isAuto = true;
     
-    // MCU send ack to Server
-    shipper.emit(MSAS, IST);
+      // MCU send ack to Server
+      shipper.emit(MSAS, IST);
+    } else {
+      // MCU send ack to Server
+      shipper.emit(MSAS, ISF);
+    }
   } else {
     // MCU send ack to Server
     shipper.emit(MSAS, ISF);
@@ -400,24 +434,22 @@ void serverSendScript(const char * payload, size_t length) {
   doc.clear();
 }
 
-void serverSendControlManualOrAuto(const char * payload, size_t length) {
+void serverSendControlManualOrAuto(const char * payload, size_t length) { 
   USE_SERIAL.print("[Manual Or Auto]Server says: ");
   USE_SERIAL.println(payload);
-  // {"is-auto":true/false}
-  
-  if (statusOfMachine.equals(RUNNING)) {
-    const int capacity = JSON_OBJECT_SIZE(2);
-    DynamicJsonDocument doc(capacity);
-  
-    String message = handleMessage(payload);
-  
-    DeserializationError err = deserializeJson(doc, message);
-    
-    if (err == DeserializationError::Ok) {
-      isAuto = doc["is-auto"].as<bool>();
+  // {"code":"CODE001","isAuto":true/false}
+  const int capacity = JSON_OBJECT_SIZE(5);
+  DynamicJsonDocument doc(capacity);
 
-//    Serial.print("isAuto: ");
-//    Serial.println(isAuto);
+  String message = handleMessage(payload);
+
+  DeserializationError err = deserializeJson(doc, message);
+  
+  if (err == DeserializationError::Ok) {
+    String code = doc["code"].as<String>();
+    Serial.println(code);
+    if (code.equals(CODE)) {
+      isAuto = doc["isAuto"].as<bool>();
       
       // MCU send ack to Server
       shipper.emit(MSACMOA, IST);
@@ -425,11 +457,56 @@ void serverSendControlManualOrAuto(const char * payload, size_t length) {
       // MCU send ack to Server
       shipper.emit(MSACMOA, ISF);
     }
+  } else {
+    // MCU send ack to Server
+    shipper.emit(MSACMOA, ISF);
+  }
+
+  doc.clear();
+}
+
+void serverSendFinishSession(const char * payload, size_t length) {
+  USE_SERIAL.print("[Finish Session]Server says: ");
+  USE_SERIAL.println(payload);
+  // {"code":"CODE001"}
+  
+  if (statusOfMachine.equals(RUNNING)) {
+    const int capacity = JSON_OBJECT_SIZE(4);
+    DynamicJsonDocument doc(capacity);
+  
+    String message = handleMessage(payload);
+  
+    DeserializationError err = deserializeJson(doc, message);
+    
+    if (err == DeserializationError::Ok) {
+      String code = doc["code"].as<String>();
+      Serial.println(code);
+      if (code.equals(CODE)) {
+        isAuto = false;
+        eFan = false;
+        bFan = false;
+        heater = false;
+        statusOfMachine = ON;
+
+        controlExhaustFan(eFan);
+        controlBlowFan(bFan);
+        controlHeater(heater);
+
+        // MCU send ack to Server
+        shipper.emit(MSAFS, IST);
+      } else {
+        // MCU send ack to Server
+        shipper.emit(MSAFS, ISF);
+      }
+    } else {
+      // MCU send ack to Server
+      shipper.emit(MSAFS, ISF);
+    }
   
     doc.clear();
   } else {
     // MCU send ack to Server
-    shipper.emit(MSACMOA, ISF);
+    shipper.emit(MSAFS, ISF);
   }
 }
 
@@ -438,14 +515,18 @@ void serverSendControlManualOrAuto(const char * payload, size_t length) {
 void controlDeviceFollowScript(float tempAverage) {
   if (isAuto) {
     if (tempAverage > 0.0 && tempAverage > temperatureOfScript) {
-      controlExhaustFan(true);
-      controlBlowFan(true);
-      controlHeater(false);
+      eFan = true;
+      bFan = true;
+      heater = false;
     } else if (tempAverage > 0.0) {
-      controlExhaustFan(false);
-      controlBlowFan(false);
-      controlHeater(true);
+      eFan = false;
+      bFan = false;
+      heater = true;
     }
+
+    controlExhaustFan(eFan);
+    controlBlowFan(bFan);
+    controlHeater(heater);
   }
 }
 
@@ -458,9 +539,6 @@ void sendSensorData() {
                        JSON_OBJECT_SIZE(2);
   DynamicJsonDocument doc(capacity);
   JsonObject payload = doc.to<JsonObject>();
-
-  // Add parameter 
-  payload["code"] = CODE;
 
   DynamicJsonDocument params(capacity);
   String result = readSensor();
@@ -489,13 +567,22 @@ void sendSensorData() {
 
     if (count > 0) {
       tempAverage /= count;
+      Serial.print("Temp average: ");
       Serial.println(tempAverage);
+      Serial.print("Temp script: ");
+      Serial.println(temperatureOfScript);
     }
 
     arr.clear();
 
     // Auto control device follow script
     controlDeviceFollowScript(tempAverage);
+
+    // Add parameter 
+    payload["code"] = CODE;
+    payload["eFan"] = eFan;
+    payload["bFan"] = bFan;
+    payload["heater"] = heater;
 
     String msg;
     serializeJson(payload, msg);
@@ -581,6 +668,7 @@ void setup() {
   shipper.on(SSCD, serverSendControlDevice);
   shipper.on(SSSCT, serverSendSetCycleTime);
   shipper.on(SSS, serverSendScript);
+  shipper.on(SSFS, serverSendFinishSession);
   shipper.on(SSCMOA, serverSendControlManualOrAuto);
 }
 
