@@ -251,6 +251,8 @@ void serverSendAckConnection(const char * payload, size_t length) {
   USE_SERIAL.print("[connection]Server says: ");
   USE_SERIAL.println(payload);
 
+  USE_SERIAL.println("Machine connected to Server.");
+
   const int capacity = JSON_OBJECT_SIZE(2);
   DynamicJsonDocument doc(capacity);
 
@@ -280,7 +282,6 @@ void serverSendControlMachine(const char * payload, size_t length) {
   
   if (err == DeserializationError::Ok) {
     String code = doc["code"].as<String>();
-    Serial.println(code);
     if (code.equals(CODE)) {
       statusOfMachine = doc["status"].as<String>();
       // Update status of devices
@@ -292,6 +293,14 @@ void serverSendControlMachine(const char * payload, size_t length) {
         controlExhaustFan(false);
         controlBlowFan(false);
         controlHeater(false);
+
+        if (statusOfMachine.equals(ON)) {
+          USE_SERIAL.println("Machine: ON");
+        } else if (statusOfMachine.equals(OFF)) {
+          USE_SERIAL.println("Machine: OFF");
+        } else if (statusOfMachine.equals(RUNNING)) {
+          USE_SERIAL.println("Machine: RUNNING");
+        }
   
       // MCU send ack to Server
       shipper.emit(MSACM, IST);
@@ -322,12 +331,21 @@ void serverSendControlDevice(const char * payload, size_t length) {
     
     if (err == DeserializationError::Ok) {
       String code = doc["code"].as<String>();
-      Serial.println(code);
       if (code.equals(CODE)) {
       
         eFan = doc["eFan"].as<bool>();
         bFan = doc["bFan"].as<bool>();
         heater = doc["heater"].as<bool>();
+
+        USE_SERIAL.print("EFan: ");
+        if (eFan) USE_SERIAL.println("ON");
+        else USE_SERIAL.println("OFF");
+        USE_SERIAL.print("BFan: ");
+        if (bFan) USE_SERIAL.println("ON");
+        else USE_SERIAL.println("OFF");
+        USE_SERIAL.print("Heater: ");
+        if (heater) USE_SERIAL.println("ON");
+        else USE_SERIAL.println("OFF");
     
         // Control device
         controlExhaustFan(eFan);
@@ -366,9 +384,12 @@ void serverSendSetCycleTime(const char * payload, size_t length) {
   
   if (err == DeserializationError::Ok) {
     String code = doc["code"].as<String>();
-    Serial.println(code);
     if (code.equals(CODE)) {
       cycleTime = doc["cycleTime"].as<int>();
+
+      USE_SERIAL.print("Đã thiết lập chu kỳ gửi dữ liệu: ");
+      USE_SERIAL.print(cycleTime);
+      USE_SERIAL.println(" mili giây");
   
       if (cycleTime < 3000) {
         cycleTime = 3000;
@@ -401,21 +422,15 @@ void serverSendScript(const char * payload, size_t length) {
   String message = handleMessage(payload);
 
   DeserializationError err = deserializeJson(doc, message);
-
-  Serial.println("Message: ");
-  Serial.println(message);
   
   if (err == DeserializationError::Ok) {
     String code = doc["code"].as<String>();
-    Serial.println(code);
     if (code.equals(CODE)) {
       temperatureOfScript = doc["temperature"].as<float>();
 
-      Serial.print("doc[\"temperature\"].as<float>();");
-      Serial.println(doc["temperature"].as<float>());
-
-//    Serial.print("Temperature of script: ");
-//    Serial.println(temperatureOfScript);
+      USE_SERIAL.print("Đã thiết lập nhiệt độ của kịch bản là: ");
+      USE_SERIAL.print(temperatureOfScript);
+      USE_SERIAL.println(" °C");
 
       statusOfMachine = RUNNING;
       isAuto = true;
@@ -447,9 +462,15 @@ void serverSendControlManualOrAuto(const char * payload, size_t length) {
   
   if (err == DeserializationError::Ok) {
     String code = doc["code"].as<String>();
-    Serial.println(code);
     if (code.equals(CODE)) {
       isAuto = doc["isAuto"].as<bool>();
+
+      USE_SERIAL.print("Auto run: ");
+      if (isAuto) {
+        USE_SERIAL.println("ON");
+      } else {
+        USE_SERIAL.println("OFF");
+      }
       
       // MCU send ack to Server
       shipper.emit(MSACMOA, IST);
@@ -480,8 +501,9 @@ void serverSendFinishSession(const char * payload, size_t length) {
     
     if (err == DeserializationError::Ok) {
       String code = doc["code"].as<String>();
-      Serial.println(code);
       if (code.equals(CODE)) {
+        USE_SERIAL.println("Kết thúc quá trình sấy!!!");
+        
         isAuto = false;
         eFan = false;
         bFan = false;
@@ -567,10 +589,12 @@ void sendSensorData() {
 
     if (count > 0) {
       tempAverage /= count;
-      Serial.print("Temp average: ");
-      Serial.println(tempAverage);
-      Serial.print("Temp script: ");
-      Serial.println(temperatureOfScript);
+      USE_SERIAL.print("Nhiệt độ trung bình: ");
+      USE_SERIAL.print(tempAverage);
+      USE_SERIAL.println(" °C");
+      USE_SERIAL.print("Nhiệt độ của kịch bản: ");
+      USE_SERIAL.print(temperatureOfScript);
+      USE_SERIAL.println(" °C");
     }
 
     arr.clear();
